@@ -1,6 +1,8 @@
 import { useState, useEffect, useRef } from 'react'
 import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse, Plan, PlanUpdateRequest, DebugMetrics } from '@cf-ai-edge-mind/shared'
 
+const API_BASE = import.meta.env.VITE_API_URL || '/api';
+
 function App() {
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState("")
@@ -30,7 +32,7 @@ function App() {
 
     const loadHistory = async (id: string) => {
         try {
-            const res = await fetch(`/api/memory/${id}`)
+            const res = await fetch(`${API_BASE}/memory/${id}`)
             if (res.ok) {
                 const data: HistoryResponse = await res.json()
                 setMessages(data.messages)
@@ -42,7 +44,7 @@ function App() {
 
     const loadPlan = async (id: string) => {
         try {
-            const res = await fetch(`/api/plan/${id}`)
+            const res = await fetch(`${API_BASE}/plan/${id}`)
             if (res.ok) {
                 const data: { plan: Plan | null } = await res.json()
                 setPlan(data.plan)
@@ -52,21 +54,21 @@ function App() {
         }
     }
 
-    const sendMessage = async () => {
-        if (!input.trim() || isLoading) return
+    const sendMessage = async (overrideContent?: string) => {
+        const contentToSend = overrideContent || input.trim();
+        if (!contentToSend || isLoading) return
 
-        const userMsgContent = input.trim()
-        setInput("")
+        if (!overrideContent) setInput("");
 
         // Optimistic update
-        const userMsg: ChatMessage = { role: 'user', content: userMsgContent }
+        const userMsg: ChatMessage = { role: 'user', content: contentToSend }
         setMessages(prev => [...prev, userMsg])
         setIsLoading(true)
         setLastMetrics(null)
 
         try {
-            const req: ChatRequest = { sessionId, message: userMsgContent, debug: debugMode }
-            const res = await fetch('/api/chat', {
+            const req: ChatRequest = { sessionId, message: contentToSend, debug: debugMode }
+            const res = await fetch(`${API_BASE}/chat`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(req)
@@ -104,7 +106,7 @@ function App() {
 
         try {
             const req: PlanUpdateRequest = { sessionId, stepId, done: !currentDone }
-            await fetch('/api/plan/update', {
+            await fetch(`${API_BASE}/plan/update`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(req)
@@ -120,7 +122,7 @@ function App() {
     const clearMemory = async () => {
         if (!confirm("Are you sure you want to clear the conversation memory?")) return;
         try {
-            await fetch('/api/memory/clear', {
+            await fetch(`${API_BASE}/memory/clear`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ sessionId })
@@ -134,7 +136,15 @@ function App() {
     }
 
     const exportMemory = async () => {
-        window.open(`/api/memory/${sessionId}`, '_blank');
+        window.open(`${API_BASE}/memory/${sessionId}`, '_blank');
+    }
+
+    const runDemo = (type: 'plan' | 'chat') => {
+        if (type === 'plan') {
+            sendMessage("Plan: Build a moon base");
+        } else {
+            sendMessage("What is the capital of Mars?");
+        }
     }
 
     return (
@@ -145,6 +155,11 @@ function App() {
                     <span className="session-id">ID: {sessionId.slice(0, 8)}...</span>
                 </div>
                 <div className="actions">
+                    <div className="demo-group">
+                        <button className="small" onClick={() => runDemo('plan')}>Demo Plan</button>
+                        <button className="small" onClick={() => runDemo('chat')}>Demo Chat</button>
+                    </div>
+                    <div className="separator"></div>
                     <label className="debug-toggle">
                         <input type="checkbox" checked={debugMode} onChange={e => setDebugMode(e.target.checked)} />
                         Debug
@@ -203,7 +218,7 @@ function App() {
                     placeholder="Type a message... (Start with 'Plan:' to create a plan)"
                     disabled={isLoading}
                 />
-                <button onClick={sendMessage} disabled={isLoading || !input.trim()}>Send</button>
+                <button onClick={() => sendMessage()} disabled={isLoading || !input.trim()}>Send</button>
             </div>
         </div>
     )

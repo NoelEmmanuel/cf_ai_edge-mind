@@ -33,6 +33,56 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
     npm run dev:web
     ```
 
+## Deployment & Evaluation
+
+This project is designed for easy deployment on Cloudflare.
+
+### 1. Deploy the API (Worker)
+
+```bash
+cd apps/api
+npx wrangler deploy
+```
+*Note the URL of the deployed worker (e.g., `https://cf-ai-edge-mind-api.your-subdomain.workers.dev`).*
+
+### 2. Deploy the Frontend (Pages)
+
+Build the web app, pointing it to your deployed API:
+
+```bash
+cd apps/web
+# Replace with your actual API URL from step 1
+export VITE_API_URL=https://cf-ai-edge-mind-api.your-subdomain.workers.dev
+npm run build
+npx wrangler pages deploy dist
+```
+
+### 3. Quick Demo Script
+
+Once deployed (or running locally), follow this script to verify all features:
+
+1.  **Check Memory & AI**:
+    - Click **"Demo Chat"** (or type "What is the capital of Mars?").
+    - Result: AI responds. Reload the page. The chat history should persist (Durable Object Memory).
+
+2.  **Check Plan Mode**:
+    - Click **"Demo Plan"** (or type "Plan: Build a moon base").
+    - Result: AI generates a structured plan. A "Current Plan" panel appears on the right.
+    - Click a checkbox to mark a step as done. Reload the page. The state is preserved.
+
+3.  **Check Observability**:
+    - Toggle the **"Debug"** checkbox in the top right.
+    - Send a new message.
+    - Result: A diagnostics panel appears below the chat showing latency for AI and DO operations.
+
+## Evaluation Checklist
+
+- [x] **LLM Integration**: Uses `@cf/meta/llama-3-8b-instruct`.
+- [x] **Workflow/Coordination**: "Plan Mode" orchestrates structured task generation and state management.
+- [x] **Input**: Text chat + Interactive Plan Checklist.
+- [x] **Memory/State**: Durable Objects store chat history and plan state per session.
+- [x] **Observability**: Debug mode surfaces performance metrics.
+
 ## API Endpoints
 
 *   `POST /api/chat`: Send a message. Returns AI reply.
@@ -41,32 +91,3 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
 *   `GET /api/memory/:sessionId`: Retrieve history.
 *   `GET /api/plan/:sessionId`: Retrieve current plan.
 *   `POST /api/plan/update`: Toggle step status.
-
-### Testing Plan Mode
-
-**1. Create a Plan:**
-In the UI or via curl, send a message starting with `plan:`:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/chat" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-plan", "message": "Plan: Organize a birthday party"}'
-```
-
-**2. Check the Plan:**
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/plan/test-plan"
-```
-
-**3. Update a Step:**
-(Replace `1` with an actual step ID from the previous command)
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/plan/update" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-plan", "stepId": "1", "done": true}'
-```
-
-### Debug Mode
-
-You can toggle "Debug" in the Web UI header to see latency stats for the last request.
-Or via curl:
-
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/chat" -Method Post -ContentType "application/json" -Body '{"sessionId": "debug-test", "message": "Hello", "debug": true}'
-```
