@@ -1,0 +1,21 @@
+name = "cf-ai-edge-mind-api"
+main = "src/index.ts"
+compatibility_date = "2024-01-01"
+
+# Durable Object bindings
+[[durable_objects.bindings]]
+name = "SESSION_DO"
+class_name = "SessionDO"
+
+# Workers AI binding
+[ai]
+binding = "AI"
+
+# Migrations for Durable Objects (when needed)
+[[migrations]]
+tag = "v1"
+new_classes = ["SessionDO"]
+
+# Environment variables
+[vars]
+ENVIRONMENT = "dev"
