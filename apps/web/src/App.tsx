@@ -12,6 +12,7 @@ function App() {
     const [debugMode, setDebugMode] = useState(false)
     const [lastMetrics, setLastMetrics] = useState<DebugMetrics | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
+    const inputRef = useRef<HTMLTextAreaElement>(null)
 
     // Initial setup
     useEffect(() => {
@@ -28,7 +29,13 @@ function App() {
     // Scroll to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    }, [messages, lastMetrics])
+    }, [messages, lastMetrics, isLoading])
+
+    useEffect(() => {
+        if (!isLoading) {
+            inputRef.current?.focus();
+        }
+    }, [isLoading]);
 
     const loadHistory = async (id: string) => {
         try {
@@ -84,7 +91,7 @@ function App() {
                 setLastMetrics(data.debug)
             }
 
-            // Check if plan changed
+            // Re-fetch plan to see if it changed
             loadPlan(sessionId)
 
         } catch (err) {
@@ -94,6 +101,13 @@ function App() {
             setIsLoading(false)
         }
     }
+
+    const handleKeyDown = (e: React.KeyboardEvent) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    };
 
     const toggleStep = async (stepId: string, currentDone: boolean) => {
         if (!plan) return;
@@ -111,11 +125,10 @@ function App() {
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(req)
             });
-            // Background re-fetch to ensure consistency
             loadPlan(sessionId);
         } catch (e) {
             console.error("Failed to update step", e);
-            loadPlan(sessionId); // implementation revert on error
+            loadPlan(sessionId);
         }
     }
 
@@ -148,78 +161,116 @@ function App() {
     }
 
     return (
-        <div className="app-container">
-            <header>
-                <div className="title-group">
+        <div className="layout-wrapper">
+            <header className="app-header">
+                <div className="brand-section">
                     <h1>AI Edge Mind</h1>
-                    <span className="session-id">ID: {sessionId.slice(0, 8)}...</span>
+                    <span className="session-badge" title={sessionId}>ID: {sessionId.slice(0, 6)}</span>
                 </div>
-                <div className="actions">
-                    <div className="demo-group">
-                        <button className="small" onClick={() => runDemo('plan')}>Demo Plan</button>
-                        <button className="small" onClick={() => runDemo('chat')}>Demo Chat</button>
+
+                <div className="toolbar">
+                    <div className="demo-controls">
+                        <button className="btn-small" onClick={() => runDemo('plan')}>Test Plan</button>
+                        <button className="btn-small" onClick={() => runDemo('chat')}>Test Chat</button>
                     </div>
-                    <div className="separator"></div>
-                    <label className="debug-toggle">
+                    <div className="divider"></div>
+                    <label className="toggle-label">
                         <input type="checkbox" checked={debugMode} onChange={e => setDebugMode(e.target.checked)} />
                         Debug
                     </label>
-                    <button className="secondary" onClick={exportMemory} title="Export JSON">Export</button>
-                    <button className="danger" onClick={clearMemory} title="Clear Conversation">Clear</button>
+                    <button className="btn-secondary" onClick={exportMemory}>Export</button>
+                    <button className="btn-danger" onClick={clearMemory}>Clear</button>
                 </div>
             </header>
 
-            <div className="main-content">
-                <div className="chat-window">
-                    {messages.length === 0 && <div className="placeholder">Start a conversation...<br /><br />Try: "Plan: Build a website"</div>}
-                    {messages.map((m, i) => (
-                        <div key={i} className={`message ${m.role}`}>
-                            <div className="bubble">{m.content}</div>
-                        </div>
-                    ))}
-                    {isLoading && <div className="message assistant"><div className="bubble">Thinking...</div></div>}
+            <main className="main-content">
+                <div className="chat-area">
+                    <div className="messages-container">
+                        {messages.length === 0 && (
+                            <div className="empty-state">
+                                <h2>Welcome to AI Edge Mind</h2>
+                                <p>Start chatting or ask to create a plan.</p>
+                                <div className="suggestion-chips">
+                                    <button onClick={() => sendMessage("Plan: Launch a marketing campaign")}>Plan: Launch a campaign</button>
+                                    <button onClick={() => sendMessage("Explain quantum computing")}>Explain quantum computing</button>
+                                </div>
+                            </div>
+                        )}
 
-                    {debugMode && lastMetrics && (
-                        <div className="debug-metrics">
-                            <h4>Last Request Metrics</h4>
-                            <ul>
-                                <li>Total Latency: {lastMetrics.total_ms}ms</li>
-                                <li>AI Inference: {lastMetrics.ai_ms}ms</li>
-                                <li>DO Read: {lastMetrics.do_read_ms}ms (History: {lastMetrics.history_count} items)</li>
-                                <li>DO Write: {lastMetrics.do_write_ms}ms</li>
-                            </ul>
-                        </div>
-                    )}
+                        {messages.map((m, i) => (
+                            <div key={i} className={`message-row ${m.role}`}>
+                                <div className={`message-bubble ${m.role}`}>
+                                    {m.role === 'assistant' && <div className="avatar">AI</div>}
+                                    <div className="message-text">{m.content}</div>
+                                </div>
+                            </div>
+                        ))}
 
-                    <div ref={messagesEndRef} />
+                        {isLoading && (
+                            <div className="message-row assistant">
+                                <div className="message-bubble assistant typing">
+                                    <span className="dot"></span><span className="dot"></span><span className="dot"></span>
+                                </div>
+                            </div>
+                        )}
+
+                        {debugMode && lastMetrics && (
+                            <div className="metrics-card">
+                                <h4>Request Metrics</h4>
+                                <div className="metrics-grid">
+                                    <div className="metric"><span>Total</span> <strong>{lastMetrics.total_ms}ms</strong></div>
+                                    <div className="metric"><span>AI</span> <strong>{lastMetrics.ai_ms}ms</strong></div>
+                                    <div className="metric"><span>DO Read</span> <strong>{lastMetrics.do_read_ms}ms</strong></div>
+                                    <div className="metric"><span>DO Write</span> <strong>{lastMetrics.do_write_ms}ms</strong></div>
+                                </div>
+                            </div>
+                        )}
+                        <div ref={messagesEndRef} />
+                    </div>
+
+                    <div className="input-compositor">
+                        <textarea
+                            ref={inputRef}
+                            value={input}
+                            onChange={(e) => setInput(e.target.value)}
+                            onKeyDown={handleKeyDown}
+                            placeholder="Type a message... (Shift+Enter for new line)"
+                            disabled={isLoading}
+                            rows={1}
+                        />
+                        <button
+                            className="send-btn"
+                            onClick={() => sendMessage()}
+                            disabled={isLoading || !input.trim()}
+                        >
+                            ➤
+                        </button>
+                    </div>
                 </div>
 
                 {plan && (
-                    <div className="plan-panel">
-                        <h3>{plan.title || "Current Plan"}</h3>
-                        <div className="steps-list">
+                    <aside className="plan-sidebar">
+                        <div className="plan-header">
+                            <h3>{plan.title || "Current Plan"}</h3>
+                            <span className="plan-status">{plan.steps.filter(s => s.done).length}/{plan.steps.length}</span>
+                        </div>
+                        <div className="plan-steps">
                             {plan.steps.map(step => (
-                                <div key={step.id} className={`step-item ${step.done ? 'done' : ''}`} onClick={() => toggleStep(step.id, step.done)}>
-                                    <div className="checkbox">{step.done ? '✓' : '○'}</div>
-                                    <div className="step-text">{step.text}</div>
+                                <div
+                                    key={step.id}
+                                    className={`plan-step ${step.done ? 'is-done' : ''}`}
+                                    onClick={() => toggleStep(step.id, step.done)}
+                                >
+                                    <div className={`checkbox ${step.done ? 'checked' : ''}`}>
+                                        {step.done && '✓'}
+                                    </div>
+                                    <span className="step-label">{step.text}</span>
                                 </div>
                             ))}
                         </div>
-                    </div>
+                    </aside>
                 )}
-            </div>
-
-            <div className="input-area">
-                <input
-                    type="text"
-                    value={input}
-                    onChange={(e) => setInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                    placeholder="Type a message... (Start with 'Plan:' to create a plan)"
-                    disabled={isLoading}
-                />
-                <button onClick={() => sendMessage()} disabled={isLoading || !input.trim()}>Send</button>
-            </div>
+            </main>
         </div>
     )
 }
