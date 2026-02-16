@@ -2099,6 +2099,29 @@ __name(SessionDO, "SessionDO");
 var app = new Hono2();
 app.get("/", (c) => c.text("Hello Cloudflare Workers!"));
 app.get("/health", (c) => c.json({ ok: true }));
+app.post("/chat", async (c) => {
+  let body;
+  try {
+    body = await c.req.json();
+  } catch (e) {
+    return c.json({ error: "Invalid JSON" }, 400);
+  }
+  if (!body.sessionId || !body.message) {
+    return c.json({ error: "Missing sessionId or message" }, 400);
+  }
+  try {
+    const response = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: [
+        { role: "system", content: "You are a helpful AI assistant." },
+        { role: "user", content: body.message }
+      ]
+    });
+    return c.json({ reply: response.response });
+  } catch (error) {
+    console.error("AI Error:", error);
+    return c.json({ error: "Failed to generate response" }, 500);
+  }
+});
 var src_default = app;
 
 // ../../node_modules/wrangler/templates/middleware/middleware-ensure-req-body-drained.ts

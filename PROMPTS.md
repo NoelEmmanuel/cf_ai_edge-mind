@@ -31,3 +31,11 @@
 **Prompt**: "make sure local dev works end-to-end and document it... Ensure root install works... Ensure npm run dev:web starts the Vite app... Ensure the web app can call the worker... Add the smallest possible GET /api/health route"
 
 **Result**: Verified `npm install` and script execution. Added `/health` endpoint to `apps/api` and updated `apps/web` to consume it. Updated `README.md` with explicit local development instructions.
+
+## 2026-02-16 Implement Chat with Workers AI
+
+**Goal / Intent**: Create the first functional AI feature by connecting the frontend chat UI to the backend Workers AI (Llama model).
+
+**Prompt**: "implement real chat with Workers AI... POST /api/chat... response with Llama model... update chat UI"
+
+**Result**: Implemented `POST /chat` in `apps/api` using `@cf/meta/llama-3-8b-instruct`. Added a React chat interface in `apps/web` with session ID management. Updated `packages/shared` with request/response types.

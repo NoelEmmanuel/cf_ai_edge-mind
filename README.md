@@ -37,4 +37,22 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
 ## Endpoints
 
 *   `GET /api`: Proxies to backend `/`. Returns "Hello Cloudflare Workers!".
-*   `GET /api/health`: Proxies to backend `/health`. Returns `{ "ok": true }`.
+*   `GET /api/health`: Returns `{ "ok": true }`.
+*   `POST /api/chat`: Send a chat message.
+
+### Testing Chat API
+
+**Bash / Command Prompt / Git Bash**:
+```bash
+curl -X POST http://localhost:8787/chat \
+  -H "Content-Type: application/json" \
+  -d "{\"sessionId\": \"test-123\", \"message\": \"Hello, tell me a joke\"}"
+```
+
+**PowerShell**:
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8787/chat" `
+  -Method Post `
+  -ContentType "application/json" `
+  -Body '{"sessionId": "test-123", "message": "Hello, tell me a joke"}'
+```
