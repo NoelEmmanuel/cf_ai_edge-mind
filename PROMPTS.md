@@ -39,3 +39,11 @@
 **Prompt**: "implement real chat with Workers AI... POST /api/chat... response with Llama model... update chat UI"
 
 **Result**: Implemented `POST /chat` in `apps/api` using `@cf/meta/llama-3-8b-instruct`. Added a React chat interface in `apps/web` with session ID management. Updated `packages/shared` with request/response types.
+
+## 2026-02-16 Integrate Durable Objects for Persistent Memory
+
+**Goal / Intent**: Enable persistent conversation history by integrating Cloudflare Durable Objects to store and retrieve chat state per session.
+
+**Prompt**: "implement real persistent memory/state using Durable Objects... Create a Durable Object class... Add DO endpoints... Update Worker API routes... Update apps/web"
+
+**Result**: Created `SessionDO` to store chat history (max 25 messages). Updated `apps/api` to route chat requests through the DO stub, providing context to the AI. Added `GET /memory/:sessionId` and `POST /memory/clear` endpoints. Updated `apps/web` to load history on mount and added "Clear" and "Export" actions.

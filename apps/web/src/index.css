@@ -19,10 +19,8 @@ body {
   min-width: 320px;
   min-height: 100vh;
   justify-content: center;
-  /* align-items: center; Remove vertical centering to allow full height chat */
 }
 
-/* Chat Layout */
 .app-container {
   width: 100%;
   max-width: 800px;
@@ -45,6 +43,18 @@ header {
 header h1 {
   margin: 0;
   font-size: 1.2rem;
+  margin-right: 1rem;
+}
+
+.title-group {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
 }
 
 .session-id {
@@ -73,6 +83,12 @@ header h1 {
 
 .message.assistant {
   align-items: flex-start;
+}
+
+.message.system {
+  align-items: center;
+  font-size: 0.8em;
+  color: #666;
 }
 
 .bubble {
@@ -118,24 +134,37 @@ input:focus {
 }
 
 button {
-  padding: 0.8rem 1.5rem;
-  border-radius: 8px;
+  padding: 0.6rem 1.2rem;
+  border-radius: 6px;
   border: 1px solid transparent;
   background-color: #646cff;
-  /* Vite default purple */
   color: white;
   cursor: pointer;
   font-weight: 500;
   font-family: inherit;
-  transition: border-color 0.25s;
+  transition: all 0.2s;
 }
 
 button:hover {
-  border-color: #747bff;
+  filter: brightness(1.1);
+}
+
+button.secondary {
+  background-color: #444;
+}
+
+button.danger {
+  background-color: #622;
+  color: #fdd;
+}
+
+button.danger:hover {
+  background-color: #822;
 }
 
 button:disabled {
-  background-color: #444;
+  background-color: #333;
+  color: #666;
   cursor: not-allowed;
 }
 

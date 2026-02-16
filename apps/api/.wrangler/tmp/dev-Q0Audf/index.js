@@ -2083,22 +2083,146 @@ var Hono2 = /* @__PURE__ */ __name(class extends Hono {
   }
 }, "Hono");
 
+// ../../node_modules/hono/dist/middleware/cors/index.js
+var cors = /* @__PURE__ */ __name((options) => {
+  const defaults = {
+    origin: "*",
+    allowMethods: ["GET", "HEAD", "PUT", "POST", "DELETE", "PATCH"],
+    allowHeaders: [],
+    exposeHeaders: []
+  };
+  const opts = {
+    ...defaults,
+    ...options
+  };
+  const findAllowOrigin = ((optsOrigin) => {
+    if (typeof optsOrigin === "string") {
+      if (optsOrigin === "*") {
+        return () => optsOrigin;
+      } else {
+        return (origin) => optsOrigin === origin ? origin : null;
+      }
+    } else if (typeof optsOrigin === "function") {
+      return optsOrigin;
+    } else {
+      return (origin) => optsOrigin.includes(origin) ? origin : null;
+    }
+  })(opts.origin);
+  const findAllowMethods = ((optsAllowMethods) => {
+    if (typeof optsAllowMethods === "function") {
+      return optsAllowMethods;
+    } else if (Array.isArray(optsAllowMethods)) {
+      return () => optsAllowMethods;
+    } else {
+      return () => [];
+    }
+  })(opts.allowMethods);
+  return /* @__PURE__ */ __name(async function cors2(c, next) {
+    function set(key, value) {
+      c.res.headers.set(key, value);
+    }
+    __name(set, "set");
+    const allowOrigin = await findAllowOrigin(c.req.header("origin") || "", c);
+    if (allowOrigin) {
+      set("Access-Control-Allow-Origin", allowOrigin);
+    }
+    if (opts.credentials) {
+      set("Access-Control-Allow-Credentials", "true");
+    }
+    if (opts.exposeHeaders?.length) {
+      set("Access-Control-Expose-Headers", opts.exposeHeaders.join(","));
+    }
+    if (c.req.method === "OPTIONS") {
+      if (opts.origin !== "*") {
+        set("Vary", "Origin");
+      }
+      if (opts.maxAge != null) {
+        set("Access-Control-Max-Age", opts.maxAge.toString());
+      }
+      const allowMethods = await findAllowMethods(c.req.header("origin") || "", c);
+      if (allowMethods.length) {
+        set("Access-Control-Allow-Methods", allowMethods.join(","));
+      }
+      let headers = opts.allowHeaders;
+      if (!headers?.length) {
+        const requestHeaders = c.req.header("Access-Control-Request-Headers");
+        if (requestHeaders) {
+          headers = requestHeaders.split(/\s*,\s*/);
+        }
+      }
+      if (headers?.length) {
+        set("Access-Control-Allow-Headers", headers.join(","));
+        c.res.headers.append("Vary", "Access-Control-Request-Headers");
+      }
+      c.res.headers.delete("Content-Length");
+      c.res.headers.delete("Content-Type");
+      return new Response(null, {
+        headers: c.res.headers,
+        status: 204,
+        statusText: "No Content"
+      });
+    }
+    await next();
+    if (opts.origin !== "*") {
+      c.header("Vary", "Origin", { append: true });
+    }
+  }, "cors2");
+}, "cors");
+
 // src/durable_objects/SessionDO.ts
 import { DurableObject } from "cloudflare:workers";
 var SessionDO = class extends DurableObject {
+  state;
+  messages = [];
   constructor(state, env) {
     super(state, env);
+    this.state = state;
+    this.state.blockConcurrencyWhile(async () => {
+      const stored = await this.state.storage.get("messages");
+      this.messages = stored || [];
+    });
   }
   async fetch(request) {
-    return new Response("Session DO active");
+    const url = new URL(request.url);
+    const path = url.pathname;
+    if (path === "/append" && request.method === "POST") {
+      const message = await request.json();
+      message.timestamp = Date.now();
+      this.messages.push(message);
+      if (this.messages.length > 25) {
+        this.messages = this.messages.slice(-25);
+      }
+      await this.state.storage.put("messages", this.messages);
+      return new Response(JSON.stringify({ ok: true, messages: this.messages }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (path === "/history" && request.method === "GET") {
+      return new Response(JSON.stringify({ messages: this.messages }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (path === "/clear" && request.method === "POST") {
+      this.messages = [];
+      await this.state.storage.delete("messages");
+      return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return new Response("Not found", { status: 404 });
   }
 };
 __name(SessionDO, "SessionDO");
 
 // src/index.ts
 var app = new Hono2();
+app.use("/*", cors());
 app.get("/", (c) => c.text("Hello Cloudflare Workers!"));
 app.get("/health", (c) => c.json({ ok: true }));
+var getSessionStub = /* @__PURE__ */ __name((c, sessionId) => {
+  const id = c.env.SESSION_DO.idFromName(sessionId);
+  return c.env.SESSION_DO.get(id);
+}, "getSessionStub");
 app.post("/chat", async (c) => {
   let body;
   try {
@@ -2109,18 +2233,50 @@ app.post("/chat", async (c) => {
   if (!body.sessionId || !body.message) {
     return c.json({ error: "Missing sessionId or message" }, 400);
   }
+  const stub = getSessionStub(c, body.sessionId);
+  const historyRes = await stub.fetch(new Request("http://internal/history"));
+  const historyData = await historyRes.json();
+  const history = historyData.messages || [];
+  const userMessage = { role: "user", content: body.message };
+  const systemMessage = { role: "system", content: "You are a helpful AI assistant." };
+  const messagesForAI = [
+    systemMessage,
+    ...history.map((m) => ({ role: m.role, content: m.content })),
+    { role: "user", content: body.message }
+  ];
   try {
-    const response = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", {
-      messages: [
-        { role: "system", content: "You are a helpful AI assistant." },
-        { role: "user", content: body.message }
-      ]
+    const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+      messages: messagesForAI
     });
-    return c.json({ reply: response.response });
+    const replyContent = aiResponse.response;
+    await stub.fetch(new Request("http://internal/append", {
+      method: "POST",
+      body: JSON.stringify(userMessage)
+    }));
+    const assistantMessage = { role: "assistant", content: replyContent };
+    await stub.fetch(new Request("http://internal/append", {
+      method: "POST",
+      body: JSON.stringify(assistantMessage)
+    }));
+    return c.json({ reply: replyContent });
   } catch (error) {
     console.error("AI Error:", error);
     return c.json({ error: "Failed to generate response" }, 500);
   }
+});
+app.get("/memory/:sessionId", async (c) => {
+  const sessionId = c.req.param("sessionId");
+  const stub = getSessionStub(c, sessionId);
+  const res = await stub.fetch(new Request("http://internal/history"));
+  return c.json(await res.json());
+});
+app.post("/memory/clear", async (c) => {
+  const body = await c.req.json();
+  if (!body.sessionId)
+    return c.json({ error: "Missing sessionId" }, 400);
+  const stub = getSessionStub(c, body.sessionId);
+  await stub.fetch(new Request("http://internal/clear", { method: "POST" }));
+  return c.json({ ok: true });
 });
 var src_default = app;
 
