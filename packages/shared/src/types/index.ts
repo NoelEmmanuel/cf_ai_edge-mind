@@ -21,3 +21,20 @@ export type ChatResponse = {
 export type HistoryResponse = {
     messages: ChatMessage[];
 };
+
+export type PlanStep = {
+    id: string;
+    text: string;
+    done: boolean;
+};
+
+export type Plan = {
+    title: string;
+    steps: PlanStep[];
+};
+
+export type PlanUpdateRequest = {
+    sessionId: string;
+    stepId: string;
+    done: boolean;
+};

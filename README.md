@@ -11,7 +11,8 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
 ## Features
 
 - **Workers AI**: Llama-3-8b-instruct for chat generation.
-- **Durable Objects**: Persistent conversational memory (last 25 messages) per session.
+- **Durable Objects**: Persistent conversational memory and Plan State management.
+- **Plan Mode**: Generate and track structured plans.
 - **Vite Proxy**: Seamless local development proxying `/api` to the worker.
 
 ## Local Development
@@ -34,29 +35,27 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
 ## API Endpoints
 
 *   `POST /api/chat`: Send a message. Returns AI reply.
-    - Body: `{ sessionId: string, message: string }`
-*   `GET /api/memory/:sessionId`: Retrieve full chat history for a session.
-*   `POST /api/memory/clear`: Clear history for a session.
-    - Body: `{ sessionId: string }`
+    - Start message with "plan:" to generate a structured plan.
+*   `GET /api/memory/:sessionId`: Retrieve history.
+*   `GET /api/plan/:sessionId`: Retrieve current plan.
+*   `POST /api/plan/update`: Toggle step status.
 
-### Testing Memory
+### Testing Plan Mode
 
-**1. Send a message (tell it your name):**
+**1. Create a Plan:**
+In the UI or via curl, send a message starting with `plan:`:
+
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/chat" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-mem", "message": "Hi, I am Noel"}'
+Invoke-RestMethod -Uri "http://localhost:8787/chat" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-plan", "message": "Plan: Organize a birthday party"}'
 ```
 
-**2. Send a follow-up (ask it to recall):**
+**2. Check the Plan:**
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/chat" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-mem", "message": "What is my name?"}'
+Invoke-RestMethod -Uri "http://localhost:8787/plan/test-plan"
 ```
 
-**3. Check History:**
+**3. Update a Step:**
+(Replace `1` with an actual step ID from the previous command)
 ```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/memory/test-mem"
-```
-
-**4. Clear History:**
-```powershell
-Invoke-RestMethod -Uri "http://localhost:8787/memory/clear" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-mem"}'
+Invoke-RestMethod -Uri "http://localhost:8787/plan/update" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-plan", "stepId": "1", "done": true}'
 ```

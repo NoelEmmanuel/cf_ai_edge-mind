@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse } from '@cf-ai-edge-mind/shared'
+import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse, Plan, PlanUpdateRequest } from '@cf-ai-edge-mind/shared'
 
 function App() {
     const [messages, setMessages] = useState<ChatMessage[]>([])
     const [input, setInput] = useState("")
     const [sessionId, setSessionId] = useState<string>("")
     const [isLoading, setIsLoading] = useState(false)
+    const [plan, setPlan] = useState<Plan | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     // Initial setup
@@ -17,12 +18,16 @@ function App() {
         }
         setSessionId(storedSessionId)
         loadHistory(storedSessionId)
+        loadPlan(storedSessionId)
     }, [])
 
     // Scroll to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
     }, [messages])
+
+    // Poll plan every 2s or after specific actions in a real app (simplified here)
+    // For now we load it once, and refresh it when we suspect changes (e.g. after message send)
 
     const loadHistory = async (id: string) => {
         try {
@@ -33,6 +38,18 @@ function App() {
             }
         } catch (e) {
             console.error("Failed to load history", e)
+        }
+    }
+
+    const loadPlan = async (id: string) => {
+        try {
+            const res = await fetch(`/api/plan/${id}`)
+            if (res.ok) {
+                const data: { plan: Plan | null } = await res.json()
+                setPlan(data.plan)
+            }
+        } catch (e) {
+            console.error("Failed to load plan", e)
         }
     }
 
@@ -60,11 +77,39 @@ function App() {
             const data: ChatResponse = await res.json()
             const assistantMsg: ChatMessage = { role: 'assistant', content: data.reply }
             setMessages(prev => [...prev, assistantMsg])
+
+            // Check if plan changed
+            loadPlan(sessionId)
+
         } catch (err) {
             console.error(err)
             setMessages(prev => [...prev, { role: 'assistant', content: "Error: Could not get response." }])
         } finally {
             setIsLoading(false)
+        }
+    }
+
+    const toggleStep = async (stepId: string, currentDone: boolean) => {
+        if (!plan) return;
+
+        // Optimistic update
+        setPlan({
+            ...plan,
+            steps: plan.steps.map(s => s.id === stepId ? { ...s, done: !currentDone } : s)
+        });
+
+        try {
+            const req: PlanUpdateRequest = { sessionId, stepId, done: !currentDone }
+            await fetch('/api/plan/update', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(req)
+            });
+            // Background re-fetch to ensure consistency
+            loadPlan(sessionId);
+        } catch (e) {
+            console.error("Failed to update step", e);
+            loadPlan(sessionId); // implementation revert on error
         }
     }
 
@@ -77,6 +122,7 @@ function App() {
                 body: JSON.stringify({ sessionId })
             });
             setMessages([]);
+            setPlan(null);
         } catch (e) {
             alert("Failed to clear memory");
         }
@@ -99,15 +145,31 @@ function App() {
                 </div>
             </header>
 
-            <div className="chat-window">
-                {messages.length === 0 && <div className="placeholder">Start a conversation...</div>}
-                {messages.map((m, i) => (
-                    <div key={i} className={`message ${m.role}`}>
-                        <div className="bubble">{m.content}</div>
+            <div className="main-content">
+                <div className="chat-window">
+                    {messages.length === 0 && <div className="placeholder">Start a conversation...<br /><br />Try: "Plan: Build a website"</div>}
+                    {messages.map((m, i) => (
+                        <div key={i} className={`message ${m.role}`}>
+                            <div className="bubble">{m.content}</div>
+                        </div>
+                    ))}
+                    {isLoading && <div className="message assistant"><div className="bubble">Thinking...</div></div>}
+                    <div ref={messagesEndRef} />
+                </div>
+
+                {plan && (
+                    <div className="plan-panel">
+                        <h3>{plan.title || "Current Plan"}</h3>
+                        <div className="steps-list">
+                            {plan.steps.map(step => (
+                                <div key={step.id} className={`step-item ${step.done ? 'done' : ''}`} onClick={() => toggleStep(step.id, step.done)}>
+                                    <div className="checkbox">{step.done ? '✓' : '○'}</div>
+                                    <div className="step-text">{step.text}</div>
+                                </div>
+                            ))}
+                        </div>
                     </div>
-                ))}
-                {isLoading && <div className="message assistant"><div className="bubble">Thinking...</div></div>}
-                <div ref={messagesEndRef} />
+                )}
             </div>
 
             <div className="input-area">
@@ -116,7 +178,7 @@ function App() {
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && sendMessage()}
-                    placeholder="Type a message..."
+                    placeholder="Type a message... (Start with 'Plan:' to create a plan)"
                     disabled={isLoading}
                 />
                 <button onClick={sendMessage} disabled={isLoading || !input.trim()}>Send</button>

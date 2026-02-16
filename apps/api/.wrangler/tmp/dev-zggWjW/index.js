@@ -1,7 +1,7 @@
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
-// .wrangler/tmp/bundle-3fnBkO/checked-fetch.js
+// .wrangler/tmp/bundle-5BEILD/checked-fetch.js
 var urls = /* @__PURE__ */ new Set();
 function checkURL(request, init) {
   const url = request instanceof URL ? request : new URL(
@@ -27,7 +27,7 @@ globalThis.fetch = new Proxy(globalThis.fetch, {
   }
 });
 
-// .wrangler/tmp/bundle-3fnBkO/strip-cf-connecting-ip-header.js
+// .wrangler/tmp/bundle-5BEILD/strip-cf-connecting-ip-header.js
 function stripCfConnectingIPHeader(input, init) {
   const request = new Request(input, init);
   request.headers.delete("CF-Connecting-IP");
@@ -2174,12 +2174,15 @@ import { DurableObject } from "cloudflare:workers";
 var SessionDO = class extends DurableObject {
   state;
   messages = [];
+  plan = null;
   constructor(state, env) {
     super(state, env);
     this.state = state;
     this.state.blockConcurrencyWhile(async () => {
-      const stored = await this.state.storage.get("messages");
-      this.messages = stored || [];
+      const storedMessages = await this.state.storage.get("messages");
+      this.messages = storedMessages || [];
+      const storedPlan = await this.state.storage.get("plan");
+      this.plan = storedPlan || null;
     });
   }
   async fetch(request) {
@@ -2204,8 +2207,35 @@ var SessionDO = class extends DurableObject {
     }
     if (path === "/clear" && request.method === "POST") {
       this.messages = [];
-      await this.state.storage.delete("messages");
+      this.plan = null;
+      await this.state.storage.delete(["messages", "plan"]);
       return new Response(JSON.stringify({ ok: true }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (path === "/plan" && request.method === "GET") {
+      return new Response(JSON.stringify({ plan: this.plan }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (path === "/plan" && request.method === "POST") {
+      const newPlan = await request.json();
+      this.plan = newPlan;
+      await this.state.storage.put("plan", this.plan);
+      return new Response(JSON.stringify({ ok: true, plan: this.plan }), {
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (path === "/plan/update" && request.method === "POST") {
+      const { stepId, done } = await request.json();
+      if (this.plan) {
+        const step = this.plan.steps.find((s) => s.id === stepId);
+        if (step) {
+          step.done = done;
+          await this.state.storage.put("plan", this.plan);
+        }
+      }
+      return new Response(JSON.stringify({ ok: true, plan: this.plan }), {
         headers: { "Content-Type": "application/json" }
       });
     }
@@ -2237,6 +2267,51 @@ app.post("/chat", async (c) => {
   const historyRes = await stub.fetch(new Request("http://internal/history"));
   const historyData = await historyRes.json();
   const history = historyData.messages || [];
+  if (body.message.toLowerCase().startsWith("plan:")) {
+    const planPrompt = body.message.substring(5).trim();
+    try {
+      console.log("Generating plan for:", planPrompt);
+      const planResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", {
+        messages: [
+          { role: "system", content: 'You are a planning assistant. Output ONLY valid JSON. Max 5 steps. EXAMPLE: { "title": "My Plan", "steps": [{ "id": "1", "text": "Step 1", "done": false }] }. Do not include any conversational text.' },
+          { role: "user", content: `Create a plan for: ${planPrompt}` }
+        ]
+      });
+      const raw2 = planResponse.response;
+      console.log("Raw AI Plan Response:", raw2);
+      let plan;
+      try {
+        const jsonMatch = raw2.match(/\{[\s\S]*\}/);
+        if (!jsonMatch) {
+          throw new Error("No JSON found in response");
+        }
+        const jsonStr = jsonMatch[0];
+        plan = JSON.parse(jsonStr);
+        if (plan.steps) {
+          plan.steps.forEach((s, i) => {
+            if (!s.id)
+              s.id = String(i + 1);
+            s.done = false;
+          });
+        }
+      } catch (e) {
+        console.error("Plan Parse Error:", e, "Raw:", raw2);
+        return c.json({ reply: `I failed to generate a structured plan. Internal Error: ${e}. Raw output: ${raw2.substring(0, 500)}` });
+      }
+      await stub.fetch(new Request("http://internal/plan", {
+        method: "POST",
+        body: JSON.stringify(plan)
+      }));
+      const userMessage2 = { role: "user", content: body.message, timestamp: Date.now() };
+      const assistantMessage = { role: "assistant", content: `I've created a plan: "${plan.title}". Check the plan tab/section.`, timestamp: Date.now() };
+      await stub.fetch(new Request("http://internal/append", { method: "POST", body: JSON.stringify(userMessage2) }));
+      await stub.fetch(new Request("http://internal/append", { method: "POST", body: JSON.stringify(assistantMessage) }));
+      return c.json({ reply: assistantMessage.content });
+    } catch (error) {
+      console.error("Plan Generation Error", error);
+      return c.json({ error: "Failed to generate plan" }, 500);
+    }
+  }
   const userMessage = { role: "user", content: body.message };
   const systemMessage = { role: "system", content: "You are a helpful AI assistant." };
   const messagesForAI = [
@@ -2277,6 +2352,23 @@ app.post("/memory/clear", async (c) => {
   const stub = getSessionStub(c, body.sessionId);
   await stub.fetch(new Request("http://internal/clear", { method: "POST" }));
   return c.json({ ok: true });
+});
+app.get("/plan/:sessionId", async (c) => {
+  const sessionId = c.req.param("sessionId");
+  const stub = getSessionStub(c, sessionId);
+  const res = await stub.fetch(new Request("http://internal/plan"));
+  return c.json(await res.json());
+});
+app.post("/plan/update", async (c) => {
+  const body = await c.req.json();
+  if (!body.sessionId || !body.stepId)
+    return c.json({ error: "Missing data" }, 400);
+  const stub = getSessionStub(c, body.sessionId);
+  const res = await stub.fetch(new Request("http://internal/plan/update", {
+    method: "POST",
+    body: JSON.stringify({ stepId: body.stepId, done: body.done })
+  }));
+  return c.json(await res.json());
 });
 var src_default = app;
 
@@ -2321,7 +2413,7 @@ var jsonError = /* @__PURE__ */ __name(async (request, env, _ctx, middlewareCtx)
 }, "jsonError");
 var middleware_miniflare3_json_error_default = jsonError;
 
-// .wrangler/tmp/bundle-3fnBkO/middleware-insertion-facade.js
+// .wrangler/tmp/bundle-5BEILD/middleware-insertion-facade.js
 var __INTERNAL_WRANGLER_MIDDLEWARE__ = [
   middleware_ensure_req_body_drained_default,
   middleware_miniflare3_json_error_default
@@ -2353,7 +2445,7 @@ function __facade_invoke__(request, env, ctx, dispatch, finalMiddleware) {
 }
 __name(__facade_invoke__, "__facade_invoke__");
 
-// .wrangler/tmp/bundle-3fnBkO/middleware-loader.entry.ts
+// .wrangler/tmp/bundle-5BEILD/middleware-loader.entry.ts
 var __Facade_ScheduledController__ = class {
   constructor(scheduledTime, cron, noRetry) {
     this.scheduledTime = scheduledTime;

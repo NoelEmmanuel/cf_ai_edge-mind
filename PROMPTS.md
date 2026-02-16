@@ -47,3 +47,11 @@
 **Prompt**: "implement real persistent memory/state using Durable Objects... Create a Durable Object class... Add DO endpoints... Update Worker API routes... Update apps/web"
 
 **Result**: Created `SessionDO` to store chat history (max 25 messages). Updated `apps/api` to route chat requests through the DO stub, providing context to the AI. Added `GET /memory/:sessionId` and `POST /memory/clear` endpoints. Updated `apps/web` to load history on mount and added "Clear" and "Export" actions.
+
+## 2026-02-16 Implement 'Plan Mode' Workflow Orchestration
+
+**Goal / Intent**: Allow the assistant to generate and track structured multi-step plans in addition to unstructured chat.
+
+**Prompt**: "add lightweight workflow orchestration (“plan mode”) using the existing Durable Object... Detect messages starting with 'plan:'... Strict JSON output... Validate and store plan... Update web UI"
+
+**Result**: Added `Plan` state to `SessionDO`. Implemented logic in `/chat` to detect `Plan:` prefix and force a JSON AI response. Added `/plan` endpoints for retrieval and updates. Updated React UI to display an interactive checklist panel when a plan exists.

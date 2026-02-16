@@ -1,17 +1,21 @@
 import { DurableObject } from "cloudflare:workers";
-import { ChatMessage } from "@cf-ai-edge-mind/shared";
+import { ChatMessage, Plan } from "@cf-ai-edge-mind/shared";
 
 export class SessionDO extends DurableObject {
     private state: DurableObjectState;
     private messages: ChatMessage[] = [];
+    private plan: Plan | null = null;
 
     constructor(state: DurableObjectState, env: Env) {
         super(state, env);
         this.state = state;
         // Restore state on initialization
         this.state.blockConcurrencyWhile(async () => {
-            const stored = await this.state.storage.get<ChatMessage[]>("messages");
-            this.messages = stored || [];
+            const storedMessages = await this.state.storage.get<ChatMessage[]>("messages");
+            this.messages = storedMessages || [];
+
+            const storedPlan = await this.state.storage.get<Plan>("plan");
+            this.plan = storedPlan || null;
         });
     }
 
@@ -19,6 +23,7 @@ export class SessionDO extends DurableObject {
         const url = new URL(request.url);
         const path = url.pathname;
 
+        // Messages Handling
         if (path === "/append" && request.method === "POST") {
             const message = await request.json() as ChatMessage;
             message.timestamp = Date.now();
@@ -43,8 +48,39 @@ export class SessionDO extends DurableObject {
 
         if (path === "/clear" && request.method === "POST") {
             this.messages = [];
-            await this.state.storage.delete("messages");
+            this.plan = null;
+            await this.state.storage.delete(["messages", "plan"]);
             return new Response(JSON.stringify({ ok: true }), {
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        // Plan Handling
+        if (path === "/plan" && request.method === "GET") {
+            return new Response(JSON.stringify({ plan: this.plan }), {
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        if (path === "/plan" && request.method === "POST") {
+            const newPlan = await request.json() as Plan;
+            this.plan = newPlan;
+            await this.state.storage.put("plan", this.plan);
+            return new Response(JSON.stringify({ ok: true, plan: this.plan }), {
+                headers: { "Content-Type": "application/json" }
+            });
+        }
+
+        if (path === "/plan/update" && request.method === "POST") {
+            const { stepId, done } = await request.json() as { stepId: string, done: boolean };
+            if (this.plan) {
+                const step = this.plan.steps.find(s => s.id === stepId);
+                if (step) {
+                    step.done = done;
+                    await this.state.storage.put("plan", this.plan);
+                }
+            }
+            return new Response(JSON.stringify({ ok: true, plan: this.plan }), {
                 headers: { "Content-Type": "application/json" }
             });
         }
