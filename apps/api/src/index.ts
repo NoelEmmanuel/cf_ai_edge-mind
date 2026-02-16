@@ -1,6 +1,6 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse, Plan, PlanUpdateRequest } from '@cf-ai-edge-mind/shared';
+import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse, Plan, PlanUpdateRequest, DebugMetrics } from '@cf-ai-edge-mind/shared';
 
 type Bindings = {
     AI: any;
@@ -14,13 +14,15 @@ app.use('/*', cors());
 app.get('/', (c) => c.text('Hello Cloudflare Workers!'));
 app.get('/health', (c) => c.json({ ok: true }));
 
-// Helper to get DO stub
 const getSessionStub = (c: any, sessionId: string) => {
     const id = c.env.SESSION_DO.idFromName(sessionId);
     return c.env.SESSION_DO.get(id);
 };
 
 app.post('/chat', async (c) => {
+    const startTime = Date.now();
+    const metrics: DebugMetrics = { total_ms: 0 };
+
     let body: ChatRequest;
     try {
         body = await c.req.json();
@@ -35,38 +37,36 @@ app.post('/chat', async (c) => {
     const stub = getSessionStub(c, body.sessionId);
 
     // 1. Get current history
+    const t0 = Date.now();
     const historyRes = await stub.fetch(new Request('http://internal/history'));
     const historyData = await historyRes.json() as HistoryResponse;
     const history = historyData.messages || [];
+    metrics.do_read_ms = Date.now() - t0;
+    metrics.history_count = history.length;
 
-    // Check for Plan Mode
+    // Plan Mode
     if (body.message.toLowerCase().startsWith('plan:')) {
         const planPrompt = body.message.substring(5).trim();
 
         try {
             console.log("Generating plan for:", planPrompt);
+            const tAI = Date.now();
             const planResponse: any = await c.env.AI.run('@cf/meta/llama-3-8b-instruct', {
                 messages: [
                     { role: 'system', content: 'You are a planning assistant. Output ONLY valid JSON. Max 5 steps. EXAMPLE: { "title": "My Plan", "steps": [{ "id": "1", "text": "Step 1", "done": false }] }. Do not include any conversational text.' },
                     { role: 'user', content: `Create a plan for: ${planPrompt}` }
                 ]
             });
+            metrics.ai_ms = Date.now() - tAI;
 
             const raw = planResponse.response;
             console.log("Raw AI Plan Response:", raw);
 
-            // Parse valid JSON from response
             let plan: Plan;
             try {
-                // improved parsing: find the first { and last }
                 const jsonMatch = raw.match(/\{[\s\S]*\}/);
-                if (!jsonMatch) {
-                    throw new Error("No JSON found in response");
-                }
-                const jsonStr = jsonMatch[0];
-                plan = JSON.parse(jsonStr);
-
-                // Ensure IDs if missing
+                if (!jsonMatch) throw new Error("No JSON found in response");
+                plan = JSON.parse(jsonMatch[0]);
                 if (plan.steps) {
                     plan.steps.forEach((s, i) => { if (!s.id) s.id = String(i + 1); s.done = false; });
                 }
@@ -75,20 +75,25 @@ app.post('/chat', async (c) => {
                 return c.json({ reply: `I failed to generate a structured plan. Internal Error: ${e}. Raw output: ${raw.substring(0, 500)}` } as ChatResponse);
             }
 
-            // Save Plan to DO
+            const tWrite = Date.now();
             await stub.fetch(new Request('http://internal/plan', {
                 method: 'POST',
                 body: JSON.stringify(plan)
             }));
-
-            // Save interaction to history
             const userMessage: ChatMessage = { role: 'user', content: body.message, timestamp: Date.now() };
             const assistantMessage: ChatMessage = { role: 'assistant', content: `I've created a plan: "${plan.title}". Check the plan tab/section.`, timestamp: Date.now() };
 
             await stub.fetch(new Request('http://internal/append', { method: 'POST', body: JSON.stringify(userMessage) }));
             await stub.fetch(new Request('http://internal/append', { method: 'POST', body: JSON.stringify(assistantMessage) }));
+            metrics.do_write_ms = Date.now() - tWrite;
 
-            return c.json({ reply: assistantMessage.content } as ChatResponse);
+            metrics.total_ms = Date.now() - startTime;
+            const responseData: ChatResponse = {
+                reply: assistantMessage.content
+            };
+            if (body.debug) responseData.debug = metrics;
+
+            return c.json(responseData);
 
         } catch (error) {
             console.error("Plan Generation Error", error);
@@ -107,12 +112,15 @@ app.post('/chat', async (c) => {
     ];
 
     try {
+        const tAI = Date.now();
         const aiResponse: any = await c.env.AI.run('@cf/meta/llama-3-8b-instruct', {
             messages: messagesForAI
         });
+        metrics.ai_ms = Date.now() - tAI;
 
         const replyContent = aiResponse.response;
 
+        const tWrite = Date.now();
         await stub.fetch(new Request('http://internal/append', {
             method: 'POST',
             body: JSON.stringify(userMessage)
@@ -123,8 +131,13 @@ app.post('/chat', async (c) => {
             method: 'POST',
             body: JSON.stringify(assistantMessage)
         }));
+        metrics.do_write_ms = Date.now() - tWrite;
 
-        return c.json({ reply: replyContent } as ChatResponse);
+        metrics.total_ms = Date.now() - startTime;
+        const responseData: ChatResponse = { reply: replyContent };
+        if (body.debug) responseData.debug = metrics;
+
+        return c.json(responseData);
 
     } catch (error: any) {
         console.error("AI Error:", error);

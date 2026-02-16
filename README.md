@@ -13,6 +13,7 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
 - **Workers AI**: Llama-3-8b-instruct for chat generation.
 - **Durable Objects**: Persistent conversational memory and Plan State management.
 - **Plan Mode**: Generate and track structured plans.
+- **Observability**: Built-in debug metrics for latency tracing.
 - **Vite Proxy**: Seamless local development proxying `/api` to the worker.
 
 ## Local Development
@@ -36,6 +37,7 @@ A monorepo for an AI-powered application built on Cloudflare Pages + Workers + W
 
 *   `POST /api/chat`: Send a message. Returns AI reply.
     - Start message with "plan:" to generate a structured plan.
+    - Add `"debug": true` to request body to receive performance metrics.
 *   `GET /api/memory/:sessionId`: Retrieve history.
 *   `GET /api/plan/:sessionId`: Retrieve current plan.
 *   `POST /api/plan/update`: Toggle step status.
@@ -58,4 +60,13 @@ Invoke-RestMethod -Uri "http://localhost:8787/plan/test-plan"
 (Replace `1` with an actual step ID from the previous command)
 ```powershell
 Invoke-RestMethod -Uri "http://localhost:8787/plan/update" -Method Post -ContentType "application/json" -Body '{"sessionId": "test-plan", "stepId": "1", "done": true}'
+```
+
+### Debug Mode
+
+You can toggle "Debug" in the Web UI header to see latency stats for the last request.
+Or via curl:
+
+```powershell
+Invoke-RestMethod -Uri "http://localhost:8787/chat" -Method Post -ContentType "application/json" -Body '{"sessionId": "debug-test", "message": "Hello", "debug": true}'
 ```

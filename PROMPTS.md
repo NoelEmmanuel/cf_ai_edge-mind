@@ -55,3 +55,11 @@
 **Prompt**: "add lightweight workflow orchestration (“plan mode”) using the existing Durable Object... Detect messages starting with 'plan:'... Strict JSON output... Validate and store plan... Update web UI"
 
 **Result**: Added `Plan` state to `SessionDO`. Implemented logic in `/chat` to detect `Plan:` prefix and force a JSON AI response. Added `/plan` endpoints for retrieval and updates. Updated React UI to display an interactive checklist panel when a plan exists.
+
+## 2026-02-16 Add Observability and Debug Metrics
+
+**Goal / Intent**: Instrument the chat and plan generation flows to measure and surface latency metrics.
+
+**Prompt**: "Add timing instrumentation inside the API for each request... total_ms, do_read_ms, ai_ms... Only include metrics in API responses when debug is enabled... Update the web UI to support a “Debug mode” toggle"
+
+**Result**: Updated shared types with `DebugMetrics`. Instrumented `index.ts` to track AI, DO, and total latency. Added a Debug toggle in `App.tsx` and a metrics display panel which conditionally renders when debug mode is active.

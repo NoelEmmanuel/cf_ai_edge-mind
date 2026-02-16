@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse, Plan, PlanUpdateRequest } from '@cf-ai-edge-mind/shared'
+import { ChatRequest, ChatResponse, ChatMessage, HistoryResponse, Plan, PlanUpdateRequest, DebugMetrics } from '@cf-ai-edge-mind/shared'
 
 function App() {
     const [messages, setMessages] = useState<ChatMessage[]>([])
@@ -7,6 +7,8 @@ function App() {
     const [sessionId, setSessionId] = useState<string>("")
     const [isLoading, setIsLoading] = useState(false)
     const [plan, setPlan] = useState<Plan | null>(null)
+    const [debugMode, setDebugMode] = useState(false)
+    const [lastMetrics, setLastMetrics] = useState<DebugMetrics | null>(null)
     const messagesEndRef = useRef<HTMLDivElement>(null)
 
     // Initial setup
@@ -24,10 +26,7 @@ function App() {
     // Scroll to bottom
     useEffect(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-    }, [messages])
-
-    // Poll plan every 2s or after specific actions in a real app (simplified here)
-    // For now we load it once, and refresh it when we suspect changes (e.g. after message send)
+    }, [messages, lastMetrics])
 
     const loadHistory = async (id: string) => {
         try {
@@ -63,9 +62,10 @@ function App() {
         const userMsg: ChatMessage = { role: 'user', content: userMsgContent }
         setMessages(prev => [...prev, userMsg])
         setIsLoading(true)
+        setLastMetrics(null)
 
         try {
-            const req: ChatRequest = { sessionId, message: userMsgContent }
+            const req: ChatRequest = { sessionId, message: userMsgContent, debug: debugMode }
             const res = await fetch('/api/chat', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -77,6 +77,10 @@ function App() {
             const data: ChatResponse = await res.json()
             const assistantMsg: ChatMessage = { role: 'assistant', content: data.reply }
             setMessages(prev => [...prev, assistantMsg])
+
+            if (data.debug) {
+                setLastMetrics(data.debug)
+            }
 
             // Check if plan changed
             loadPlan(sessionId)
@@ -123,6 +127,7 @@ function App() {
             });
             setMessages([]);
             setPlan(null);
+            setLastMetrics(null);
         } catch (e) {
             alert("Failed to clear memory");
         }
@@ -140,6 +145,10 @@ function App() {
                     <span className="session-id">ID: {sessionId.slice(0, 8)}...</span>
                 </div>
                 <div className="actions">
+                    <label className="debug-toggle">
+                        <input type="checkbox" checked={debugMode} onChange={e => setDebugMode(e.target.checked)} />
+                        Debug
+                    </label>
                     <button className="secondary" onClick={exportMemory} title="Export JSON">Export</button>
                     <button className="danger" onClick={clearMemory} title="Clear Conversation">Clear</button>
                 </div>
@@ -154,6 +163,19 @@ function App() {
                         </div>
                     ))}
                     {isLoading && <div className="message assistant"><div className="bubble">Thinking...</div></div>}
+
+                    {debugMode && lastMetrics && (
+                        <div className="debug-metrics">
+                            <h4>Last Request Metrics</h4>
+                            <ul>
+                                <li>Total Latency: {lastMetrics.total_ms}ms</li>
+                                <li>AI Inference: {lastMetrics.ai_ms}ms</li>
+                                <li>DO Read: {lastMetrics.do_read_ms}ms (History: {lastMetrics.history_count} items)</li>
+                                <li>DO Write: {lastMetrics.do_write_ms}ms</li>
+                            </ul>
+                        </div>
+                    )}
+
                     <div ref={messagesEndRef} />
                 </div>
 

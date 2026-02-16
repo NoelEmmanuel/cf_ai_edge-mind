@@ -2254,6 +2254,8 @@ var getSessionStub = /* @__PURE__ */ __name((c, sessionId) => {
   return c.env.SESSION_DO.get(id);
 }, "getSessionStub");
 app.post("/chat", async (c) => {
+  const startTime = Date.now();
+  const metrics = { total_ms: 0 };
   let body;
   try {
     body = await c.req.json();
@@ -2264,29 +2266,32 @@ app.post("/chat", async (c) => {
     return c.json({ error: "Missing sessionId or message" }, 400);
   }
   const stub = getSessionStub(c, body.sessionId);
+  const t0 = Date.now();
   const historyRes = await stub.fetch(new Request("http://internal/history"));
   const historyData = await historyRes.json();
   const history = historyData.messages || [];
+  metrics.do_read_ms = Date.now() - t0;
+  metrics.history_count = history.length;
   if (body.message.toLowerCase().startsWith("plan:")) {
     const planPrompt = body.message.substring(5).trim();
     try {
       console.log("Generating plan for:", planPrompt);
+      const tAI = Date.now();
       const planResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", {
         messages: [
           { role: "system", content: 'You are a planning assistant. Output ONLY valid JSON. Max 5 steps. EXAMPLE: { "title": "My Plan", "steps": [{ "id": "1", "text": "Step 1", "done": false }] }. Do not include any conversational text.' },
           { role: "user", content: `Create a plan for: ${planPrompt}` }
         ]
       });
+      metrics.ai_ms = Date.now() - tAI;
       const raw2 = planResponse.response;
       console.log("Raw AI Plan Response:", raw2);
       let plan;
       try {
         const jsonMatch = raw2.match(/\{[\s\S]*\}/);
-        if (!jsonMatch) {
+        if (!jsonMatch)
           throw new Error("No JSON found in response");
-        }
-        const jsonStr = jsonMatch[0];
-        plan = JSON.parse(jsonStr);
+        plan = JSON.parse(jsonMatch[0]);
         if (plan.steps) {
           plan.steps.forEach((s, i) => {
             if (!s.id)
@@ -2298,6 +2303,7 @@ app.post("/chat", async (c) => {
         console.error("Plan Parse Error:", e, "Raw:", raw2);
         return c.json({ reply: `I failed to generate a structured plan. Internal Error: ${e}. Raw output: ${raw2.substring(0, 500)}` });
       }
+      const tWrite = Date.now();
       await stub.fetch(new Request("http://internal/plan", {
         method: "POST",
         body: JSON.stringify(plan)
@@ -2306,7 +2312,14 @@ app.post("/chat", async (c) => {
       const assistantMessage = { role: "assistant", content: `I've created a plan: "${plan.title}". Check the plan tab/section.`, timestamp: Date.now() };
       await stub.fetch(new Request("http://internal/append", { method: "POST", body: JSON.stringify(userMessage2) }));
       await stub.fetch(new Request("http://internal/append", { method: "POST", body: JSON.stringify(assistantMessage) }));
-      return c.json({ reply: assistantMessage.content });
+      metrics.do_write_ms = Date.now() - tWrite;
+      metrics.total_ms = Date.now() - startTime;
+      const responseData = {
+        reply: assistantMessage.content
+      };
+      if (body.debug)
+        responseData.debug = metrics;
+      return c.json(responseData);
     } catch (error) {
       console.error("Plan Generation Error", error);
       return c.json({ error: "Failed to generate plan" }, 500);
@@ -2320,10 +2333,13 @@ app.post("/chat", async (c) => {
     { role: "user", content: body.message }
   ];
   try {
+    const tAI = Date.now();
     const aiResponse = await c.env.AI.run("@cf/meta/llama-3-8b-instruct", {
       messages: messagesForAI
     });
+    metrics.ai_ms = Date.now() - tAI;
     const replyContent = aiResponse.response;
+    const tWrite = Date.now();
     await stub.fetch(new Request("http://internal/append", {
       method: "POST",
       body: JSON.stringify(userMessage)
@@ -2333,7 +2349,12 @@ app.post("/chat", async (c) => {
       method: "POST",
       body: JSON.stringify(assistantMessage)
     }));
-    return c.json({ reply: replyContent });
+    metrics.do_write_ms = Date.now() - tWrite;
+    metrics.total_ms = Date.now() - startTime;
+    const responseData = { reply: replyContent };
+    if (body.debug)
+      responseData.debug = metrics;
+    return c.json(responseData);
   } catch (error) {
     console.error("AI Error:", error);
     return c.json({ error: "Failed to generate response" }, 500);
